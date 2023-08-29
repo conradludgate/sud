@@ -2,7 +2,7 @@ use crate::{event::Event, try_polyfill::Try, Serializer};
 
 mod atoms;
 mod list;
-// mod map;
+mod map;
 
 impl<T: Serializer + ?Sized> Serializer for &T {
     type State<'a>  = T::State<'a> where Self: 'a;
@@ -15,7 +15,7 @@ impl<T: Serializer + ?Sized> Serializer for &T {
         <T as Serializer>::try_fold_events(self, state, init, f)
     }
 
-    fn get_state<'a>(&'a self) -> Self::State<'a> {
+    fn get_state(&self) -> Self::State<'_> {
         T::get_state(self)
     }
 }

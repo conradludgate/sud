@@ -291,6 +291,8 @@ static ESCAPE: [u8; 256] = [
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use sud_core::Serializer;
 
     use crate::JsonSerializer;
@@ -309,5 +311,26 @@ mod tests {
 
         let output = String::from_utf8(output).unwrap();
         assert_eq!(output, "[1,2,3,4]");
+    }
+
+    #[test]
+    fn str_map() {
+        let data = HashMap::from([("abc", 1), ("def", 2)]);
+
+        let mut output = Vec::new();
+        let mut serializer = JsonSerializer::new(&mut output);
+
+        data.try_for_each_event(&mut data.get_state(), |event| serializer.write(event))
+            .unwrap();
+
+        assert_eq!(serializer.stack, &[]);
+
+        let order_a = r#"{"abc":1,"def":2}"#;
+        let order_b = r#"{"def":2,"abc":1}"#;
+
+        let output = String::from_utf8(output).unwrap();
+        if output != order_a {
+            assert_eq!(output, order_b);
+        }
     }
 }

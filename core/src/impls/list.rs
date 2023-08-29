@@ -98,7 +98,7 @@ impl<T: Serializer> Serializer for [T] {
         }
     }
 
-    fn get_state<'a>(&'a self) -> Self::State<'a> {
+    fn get_state(&self) -> Self::State<'_> {
         ListState::Start
     }
 }
@@ -125,7 +125,7 @@ impl<T: Serializer> Serializer for Vec<T> {
     }
 
     type State<'a> = ListState<'a, T> where Self: 'a;
-    fn get_state<'a>(&'a self) -> Self::State<'a> {
+    fn get_state(&self) -> Self::State<'_> {
         <[T] as Serializer>::get_state(self)
     }
 }
@@ -152,7 +152,7 @@ impl<T: Serializer, const N: usize> Serializer for [T; N] {
     }
 
     type State<'a> = ListState<'a, T> where Self: 'a;
-    fn get_state<'a>(&'a self) -> Self::State<'a> {
+    fn get_state(&self) -> Self::State<'_> {
         <[T] as Serializer>::get_state(self)
     }
 }

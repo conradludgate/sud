@@ -60,7 +60,7 @@ pub trait Serializer {
         R: Try<Continue = B>,
         F: FnMut(B, Event<'a>) -> R;
 
-    fn get_state<'a>(&'a self) -> Self::State<'a>;
+    fn get_state(&self) -> Self::State<'_>;
 
     /// Hidden internal trait method to allow specializations of bytes.
     ///
