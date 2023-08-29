@@ -2,6 +2,8 @@ use std::borrow::Cow;
 
 use crate::{
     event::{Atom, Event},
+    tri,
+    try_polyfill::Try,
     Cursor, Serializer,
 };
 
@@ -14,18 +16,14 @@ macro_rules! signed_int {
             }
 
             #[inline]
-            fn try_fold<'a, B, E, F>(
-                &'a self,
-                stack: Cursor<'_>,
-                mut init: B,
-                mut f: F,
-            ) -> Result<B, E>
+            fn try_fold_events<'a, B, R, F>(&'a self, stack: Cursor<'_>, mut init: B, mut f: F) -> R
             where
-                F: FnMut(B, Event<'a>) -> Result<B, E>,
+                R: Try<Continue = B>,
+                F: FnMut(B, Event<'a>) -> R,
             {
-                init = f(init, Event::Atom(Atom::I64(*self as i64)))?;
+                init = tri!(f(init, Event::Atom(Atom::I64(*self as i64))));
                 stack.complete();
-                Ok(init)
+                R::from_continue(init)
             }
         }
     };
@@ -40,18 +38,14 @@ macro_rules! unsigned_int {
             }
 
             #[inline]
-            fn try_fold<'a, B, E, F>(
-                &'a self,
-                stack: Cursor<'_>,
-                mut init: B,
-                mut f: F,
-            ) -> Result<B, E>
+            fn try_fold_events<'a, B, R, F>(&'a self, stack: Cursor<'_>, mut init: B, mut f: F) -> R
             where
-                F: FnMut(B, Event<'a>) -> Result<B, E>,
+                R: Try<Continue = B>,
+                F: FnMut(B, Event<'a>) -> R,
             {
-                init = f(init, Event::Atom(Atom::U64(*self as u64)))?;
+                init = tri!(f(init, Event::Atom(Atom::U64(*self as u64))));
                 stack.complete();
-                Ok(init)
+                R::from_continue(init)
             }
         }
     };
@@ -74,13 +68,14 @@ impl Serializer for u8 {
     }
 
     #[inline]
-    fn try_fold<'a, B, E, F>(&'a self, stack: Cursor<'_>, mut init: B, mut f: F) -> Result<B, E>
+    fn try_fold_events<'a, B, R, F>(&'a self, stack: Cursor<'_>, mut init: B, mut f: F) -> R
     where
-        F: FnMut(B, Event<'a>) -> Result<B, E>,
+        R: Try<Continue = B>,
+        F: FnMut(B, Event<'a>) -> R,
     {
-        init = f(init, Event::Atom(Atom::U64(*self as u64)))?;
+        init = tri!(f(init, Event::Atom(Atom::U64(*self as u64))));
         stack.complete();
-        Ok(init)
+        R::from_continue(init)
     }
 
     #[inline]
@@ -99,13 +94,14 @@ impl Serializer for str {
     }
 
     #[inline]
-    fn try_fold<'a, B, E, F>(&'a self, stack: Cursor<'_>, mut init: B, mut f: F) -> Result<B, E>
+    fn try_fold_events<'a, B, R, F>(&'a self, stack: Cursor<'_>, mut init: B, mut f: F) -> R
     where
-        F: FnMut(B, Event<'a>) -> Result<B, E>,
+        R: Try<Continue = B>,
+        F: FnMut(B, Event<'a>) -> R,
     {
-        init = f(init, Event::Atom(Atom::Str(Cow::Borrowed(self))))?;
+        init = tri!(f(init, Event::Atom(Atom::Str(Cow::Borrowed(self)))));
         stack.complete();
-        Ok(init)
+        R::from_continue(init)
     }
 }
 
@@ -116,10 +112,11 @@ impl Serializer for String {
     }
 
     #[inline]
-    fn try_fold<'a, B, E, F>(&'a self, stack: Cursor<'_>, init: B, f: F) -> Result<B, E>
+    fn try_fold_events<'a, B, R, F>(&'a self, stack: Cursor<'_>, init: B, f: F) -> R
     where
-        F: FnMut(B, Event<'a>) -> Result<B, E>,
+        R: Try<Continue = B>,
+        F: FnMut(B, Event<'a>) -> R,
     {
-        <str as Serializer>::try_fold(self, stack, init, f)
+        <str as Serializer>::try_fold_events(self, stack, init, f)
     }
 }
