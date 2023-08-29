@@ -291,7 +291,7 @@ static ESCAPE: [u8; 256] = [
 
 #[cfg(test)]
 mod tests {
-    use sud_core::{Serializer, Stack};
+    use sud_core::Serializer;
 
     use crate::JsonSerializer;
 
@@ -302,8 +302,7 @@ mod tests {
         let mut output = Vec::new();
         let mut serializer = JsonSerializer::new(&mut output);
 
-        let mut stack = Stack::new();
-        data.try_for_each_event(stack.start(), |event| serializer.write(event))
+        data.try_for_each_event(&mut data.get_state(), |event| serializer.write(event))
             .unwrap();
 
         assert_eq!(serializer.stack, &[]);

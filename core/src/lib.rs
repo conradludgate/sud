@@ -8,76 +8,16 @@ use try_polyfill::Try;
 mod event;
 mod impls;
 
-pub struct Stack {
-    stack: Vec<usize>,
-}
-
-impl Stack {
-    pub fn new() -> Self {
-        Stack {
-            stack: Vec::with_capacity(8),
-        }
-    }
-
-    pub fn start(&mut self) -> Cursor<'_> {
-        if self.stack.is_empty() {
-            self.stack.push(0);
-        }
-        Cursor {
-            inner: &mut self.stack,
-            depth: 0,
-        }
-    }
-}
-
-impl Default for Stack {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-pub struct Cursor<'a> {
-    inner: &'a mut Vec<usize>,
-    depth: usize,
-}
-
-impl<'a> Cursor<'a> {
-    #[inline]
-    pub fn get(&self) -> usize {
-        unsafe { *self.inner.get_unchecked(self.depth) }
-    }
-
-    #[inline]
-    pub fn next(&mut self) {
-        unsafe { *self.inner.get_unchecked_mut(self.depth) += 1 }
-    }
-
-    #[inline]
-    pub fn deeper(&mut self) -> Cursor<'_> {
-        let depth = self.depth + 1;
-        if self.inner.len() == depth {
-            self.inner.push(0);
-        }
-        Cursor {
-            inner: self.inner,
-            depth,
-        }
-    }
-
-    #[inline]
-    pub fn complete(self) {
-        self.inner.truncate(self.depth);
-    }
-}
-
 pub trait Serializer {
+    type State<'a> where Self: 'a;
+
     // lower bound on how many events this layer will emit
     fn estimate_size(&self) -> usize {
         0
     }
 
-    fn fill_buffer<'a>(&'a self, stack: Cursor<'_>, buf: &mut Vec<Event<'a>>) {
-        let _ = self.try_fold_events(stack, (), |(), event| {
+    fn fill_buffer<'a>(&'a self, state: &mut Self::State<'a>, buf: &mut Vec<Event<'a>>) {
+        let _ = self.try_fold_events(state, (), |(), event| {
             if buf.len() < buf.capacity() {
                 buf.push(event);
                 Ok(())
@@ -88,37 +28,39 @@ pub trait Serializer {
     }
 
     #[inline]
-    fn for_each_event<'a, F>(&'a self, stack: Cursor<'_>, mut f: F)
+    fn for_each_event<'a, F>(&'a self, state: &mut Self::State<'a>, mut f: F)
     where
         F: FnMut(Event<'a>),
     {
-        self.fold_events(stack, (), |(), x| f(x))
+        self.fold_events(state, (), |(), x| f(x))
     }
 
     #[inline]
-    fn fold_events<'a, B, F>(&'a self, stack: Cursor<'_>, init: B, mut f: F) -> B
+    fn fold_events<'a, B, F>(&'a self, state: &mut Self::State<'a>, init: B, mut f: F) -> B
     where
         F: FnMut(B, Event<'a>) -> B,
     {
-        match self.try_fold_events(stack, init, |acc, x| Ok::<B, Infallible>(f(acc, x))) {
+        match self.try_fold_events(state, init, |acc, x| Ok::<B, Infallible>(f(acc, x))) {
             Ok(r) => r,
             Err(x) => match x {},
         }
     }
 
     #[inline]
-    fn try_for_each_event<'a, R, F>(&'a self, stack: Cursor<'_>, mut f: F) -> R
+    fn try_for_each_event<'a, R, F>(&'a self, state: &mut Self::State<'a>, mut f: F) -> R
     where
         R: Try<Continue = ()>,
         F: FnMut(Event<'a>) -> R,
     {
-        self.try_fold_events(stack, (), |(), x| f(x))
+        self.try_fold_events(state, (), |(), x| f(x))
     }
 
-    fn try_fold_events<'a, B, R, F>(&'a self, stack: Cursor<'_>, init: B, f: F) -> R
+    fn try_fold_events<'a, B, R, F>(&'a self, state: &mut Self::State<'a>, init: B, f: F) -> R
     where
         R: Try<Continue = B>,
         F: FnMut(B, Event<'a>) -> R;
+
+    fn get_state<'a>(&'a self) -> Self::State<'a>;
 
     /// Hidden internal trait method to allow specializations of bytes.
     ///
