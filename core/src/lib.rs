@@ -9,7 +9,9 @@ mod event;
 mod impls;
 
 pub trait Serializer {
-    type State<'a> where Self: 'a;
+    type State<'a>
+    where
+        Self: 'a;
 
     // lower bound on how many events this layer will emit
     fn estimate_size(&self) -> usize {

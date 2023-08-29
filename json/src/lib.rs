@@ -2,9 +2,16 @@ use std::io::{self, Write};
 
 use sud_core::{Atom, Event};
 
+mod frame;
+
 pub struct JsonSerializer<W> {
-    stack: Vec<State>,
+    enc: JsonEncoder,
     out: W,
+}
+
+#[derive(Default)]
+struct JsonEncoder {
+    stack: Vec<State>,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -46,7 +53,7 @@ impl Object {
 impl<W> JsonSerializer<W> {
     pub fn new(output: W) -> Self {
         Self {
-            stack: vec![],
+            enc: JsonEncoder::default(),
             out: output,
         }
     }
@@ -54,51 +61,52 @@ impl<W> JsonSerializer<W> {
 
 impl<W: Write> JsonSerializer<W> {
     pub fn write(&mut self, event: Event<'_>) -> io::Result<()> {
+        self.enc.write(event, &mut self.out)
+    }
+}
+
+impl JsonEncoder {
+    pub fn write<W: Write>(&mut self, event: Event<'_>, mut dst: W) -> io::Result<()> {
         match event {
             Event::Atom(atom) => {
-                // let state = self.stack.last().copied().unwrap_or_default();
-                // if !state.is_first {
-                //     self.out.write_all(b",")?;
-                // }
-
                 if let Some(State { pos, object }) = self.stack.last_mut() {
                     if *pos == Position::NotFirst {
-                        self.out.write_all(object.prefix())?;
+                        dst.write_all(object.prefix())?;
                     } else {
                         *pos = Position::NotFirst;
                     }
                 }
 
                 match atom {
-                    Atom::Null => self.out.write_all(b"null")?,
-                    Atom::Bool(true) => self.out.write_all(b"true")?,
-                    Atom::Bool(false) => self.out.write_all(b"false")?,
-                    Atom::Char(c) => format_escaped_str(&mut self.out, c.encode_utf8(&mut [0; 4]))?,
-                    Atom::Str(s) => format_escaped_str(&mut self.out, &s)?,
+                    Atom::Null => dst.write_all(b"null")?,
+                    Atom::Bool(true) => dst.write_all(b"true")?,
+                    Atom::Bool(false) => dst.write_all(b"false")?,
+                    Atom::Char(c) => format_escaped_str(&mut dst, c.encode_utf8(&mut [0; 4]))?,
+                    Atom::Str(s) => format_escaped_str(&mut dst, &s)?,
                     Atom::Bytes(b) => {
                         let mut buf = itoa::Buffer::new();
                         let mut not_first = false;
-                        self.out.write_all(b"[")?;
+                        dst.write_all(b"[")?;
                         for b in &*b {
                             if not_first {
-                                self.out.write_all(b",")?;
+                                dst.write_all(b",")?;
                                 not_first = true;
                             }
-                            self.out.write_all(buf.format(*b).as_bytes())?;
+                            dst.write_all(buf.format(*b).as_bytes())?;
                         }
-                        self.out.write_all(b"]")?;
+                        dst.write_all(b"]")?;
                     }
                     Atom::U64(i) => {
                         let mut buf = itoa::Buffer::new();
-                        self.out.write_all(buf.format(i).as_bytes())?;
+                        dst.write_all(buf.format(i).as_bytes())?;
                     }
                     Atom::I64(i) => {
                         let mut buf = itoa::Buffer::new();
-                        self.out.write_all(buf.format(i).as_bytes())?;
+                        dst.write_all(buf.format(i).as_bytes())?;
                     }
                     Atom::F64(i) => {
                         let mut buf = ryu::Buffer::new();
-                        self.out.write_all(buf.format(i).as_bytes())?;
+                        dst.write_all(buf.format(i).as_bytes())?;
                     }
                     _ => {
                         return Err(io::Error::new(
@@ -115,7 +123,7 @@ impl<W: Write> JsonSerializer<W> {
                 Ok(())
             }
             Event::MapStart(_) => {
-                self.out.write_all(b"{")?;
+                dst.write_all(b"{")?;
                 self.stack.push(State {
                     pos: Position::First,
                     object: Object::MapKey,
@@ -123,12 +131,12 @@ impl<W: Write> JsonSerializer<W> {
                 Ok(())
             }
             Event::MapEnd => {
-                self.out.write_all(b"}")?;
+                dst.write_all(b"}")?;
                 self.stack.pop();
                 Ok(())
             }
             Event::SeqStart(_) => {
-                self.out.write_all(b"[")?;
+                dst.write_all(b"[")?;
                 self.stack.push(State {
                     pos: Position::First,
                     object: Object::Value,
@@ -136,7 +144,7 @@ impl<W: Write> JsonSerializer<W> {
                 Ok(())
             }
             Event::SeqEnd => {
-                self.out.write_all(b"]")?;
+                dst.write_all(b"]")?;
                 self.stack.pop();
                 Ok(())
             }
@@ -291,46 +299,75 @@ static ESCAPE: [u8; 256] = [
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, future::poll_fn, pin::pin, task::Poll};
 
-    use sud_core::Serializer;
+    use futures_util::{sink::Sink, SinkExt};
+    use sud_core::{tri, Serializer};
+    use tokio_util::codec::FramedWrite;
 
-    use crate::JsonSerializer;
+    use crate::{JsonEncoder, JsonSerializer};
 
     #[test]
     fn int_slice() {
         let data = [1, 2, 3, 4];
 
-        let mut output = Vec::new();
-        let mut serializer = JsonSerializer::new(&mut output);
+        let mut serializer = JsonSerializer::new(Vec::new());
 
         data.try_for_each_event(&mut data.get_state(), |event| serializer.write(event))
             .unwrap();
 
-        assert_eq!(serializer.stack, &[]);
-
-        let output = String::from_utf8(output).unwrap();
+        let output = String::from_utf8(serializer.out).unwrap();
         assert_eq!(output, "[1,2,3,4]");
+
+        assert_eq!(serializer.enc.stack, &[]);
     }
 
     #[test]
     fn str_map() {
         let data = HashMap::from([("abc", 1), ("def", 2)]);
 
-        let mut output = Vec::new();
-        let mut serializer = JsonSerializer::new(&mut output);
+        let mut serializer = JsonSerializer::new(Vec::new());
 
         data.try_for_each_event(&mut data.get_state(), |event| serializer.write(event))
             .unwrap();
 
-        assert_eq!(serializer.stack, &[]);
+        let order_a = r#"{"abc":1,"def":2}"#;
+        let order_b = r#"{"def":2,"abc":1}"#;
+
+        let output = String::from_utf8(serializer.out).unwrap();
+        if output != order_a {
+            assert_eq!(output, order_b);
+        }
+
+        assert_eq!(serializer.enc.stack, &[]);
+    }
+
+    #[tokio::test]
+    async fn async_str_map() {
+        let data = HashMap::from([("abc", 1), ("def", 2)]);
+
+        let mut serializer = pin!(FramedWrite::new(Vec::new(), JsonEncoder::default()));
+
+        let mut state = data.get_state();
+        poll_fn(|cx| {
+            data.try_for_each_event(&mut state, |event| {
+                tri!(serializer.as_mut().poll_ready(cx));
+                Poll::Ready(serializer.as_mut().start_send(event))
+            })
+        })
+        .await
+        .unwrap();
+
+        serializer.close().await.unwrap();
 
         let order_a = r#"{"abc":1,"def":2}"#;
         let order_b = r#"{"def":2,"abc":1}"#;
 
-        let output = String::from_utf8(output).unwrap();
+        let output = String::from_utf8(serializer.get_ref().to_owned()).unwrap();
         if output != order_a {
             assert_eq!(output, order_b);
         }
+
+        assert_eq!(serializer.encoder().stack, &[]);
     }
 }

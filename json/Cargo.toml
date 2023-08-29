@@ -12,3 +12,10 @@ repository = "https://github.com/conradludgate/sud"
 sud-core = { version = "0.0.0", path = "../core" }
 itoa = "1.0.9"
 ryu = "1.0.15"
+
+tokio-util = { version = "0.7.0", features = ["codec"] }
+bytes = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+futures-util = { version = "0.3.28", features = ["sink"] }
